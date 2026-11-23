@@ -46,13 +46,25 @@ public enum Renderer {
 
     // MARK: element sources
 
-    static func attributed(_ e: LabelElement) -> NSAttributedString {
+    /// The exact font a text item is drawn with; `scale` enlarges it for on-screen editing.
+    public static func font(for e: LabelElement, scale: CGFloat = 1) -> NSFont {
         var traits: NSFontTraitMask = []
         if e.bold { traits.insert(.boldFontMask) }
         if e.italic { traits.insert(.italicFontMask) }
-        let size = max(4, e.fitSize ?? e.fontSize)
-        let font = NSFontManager.shared.font(withFamily: e.fontName, traits: traits, weight: e.bold ? 9 : 5, size: size)
+        let size = max(4, e.fontSize) * scale
+        return NSFontManager.shared.font(withFamily: e.fontName, traits: traits, weight: e.bold ? 9 : 5, size: size)
             ?? (e.bold ? NSFont.boldSystemFont(ofSize: size) : NSFont.systemFont(ofSize: size))
+    }
+
+    /// Size of a text item's block when laid out `scale` times larger, measured rather than multiplied.
+    public static func textSize(_ e: LabelElement, scale: CGFloat) -> CGSize {
+        var copy = e
+        copy.fontSize = max(4, e.fontSize) * scale
+        return naturalSize(copy)
+    }
+
+    static func attributed(_ e: LabelElement) -> NSAttributedString {
+        let font = Self.font(for: e)
         let para = NSMutableParagraphStyle()
         para.alignment = e.alignment == 0 ? .left : (e.alignment == 2 ? .right : .center)
         return NSAttributedString(string: e.text.isEmpty ? " " : e.text,
@@ -203,6 +215,23 @@ public enum Renderer {
         var px = pixels(of: ctx)
         for i in px.indices { px[i] = px[i] < 128 ? 0 : 255 }
         return Bitmap(width: w, height: h, pixels: px)
+    }
+
+    /// A smooth, anti-aliased picture of the label for the screen, `scale` pixels per printer dot.
+    /// Easier on the eye than the dots, but only `render` shows exactly what will be burned.
+    public static func preview(_ doc: LabelDocument, scale: CGFloat) -> CGImage? {
+        let w = max(8, doc.lengthDots), h = max(8, doc.widthDots)
+        let s = max(1, min(scale, 16))
+        guard let ctx = grayContext(Int((CGFloat(w) * s).rounded()), Int((CGFloat(h) * s).rounded())) else { return nil }
+        ctx.translateBy(x: 0, y: CGFloat(ctx.height))
+        ctx.scaleBy(x: CGFloat(ctx.width) / CGFloat(w), y: -CGFloat(ctx.height) / CGFloat(h))
+        ctx.setShouldAntialias(true)
+        ctx.setShouldSmoothFonts(false)
+        let previous = NSGraphicsContext.current
+        NSGraphicsContext.current = NSGraphicsContext(cgContext: ctx, flipped: true)
+        for e in doc.elements { draw(e, ctx) }
+        NSGraphicsContext.current = previous
+        return ctx.makeImage()
     }
 
     /// Printable head columns for the printer: 12 bytes per column, the label's end margins left out.

@@ -16,11 +16,11 @@ struct ContentView: View {
                 Divider()
                 CanvasView(model: model)
             }
-            .frame(minWidth: 430)
+            .frame(minWidth: 360)
             if showInspector {
                 Divider()
                 InspectorPanel(model: model, printer: model.printer)
-                    .frame(width: 220)
+                    .frame(width: 236)
             }
         }
         .frame(minHeight: 380)
@@ -32,20 +32,40 @@ struct ContentView: View {
 struct AddBar: View {
     @ObservedObject var model: AppModel
     @AppStorage("showInspector") private var showInspector = true
+    @AppStorage("exactDots") private var exactDots = false
+
+    private static let items: [(kind: ElementKind, title: String, icon: String)] = [
+        (.text, "Text", "textformat"), (.qr, "QR Code", "qrcode"), (.barcode, "Barcode", "barcode"),
+        (.image, "Image", "photo"), (.box, "Box", "rectangle"),
+    ]
+
+    private func buttons(titles: Bool) -> some View {
+        HStack(spacing: 6) {
+            ForEach(Self.items, id: \.title) { item in
+                Button { model.add(item.kind) } label: {
+                    if titles { Label(item.title, systemImage: item.icon) } else { Image(systemName: item.icon) }
+                }
+                .help("Add \(item.title)")
+            }
+        }
+    }
 
     var body: some View {
         HStack(spacing: 8) {
-            Button { model.add(.text) } label: { Label("Text", systemImage: "textformat") }
-            Button { model.add(.qr) } label: { Label("QR Code", systemImage: "qrcode") }
-            Button { model.add(.barcode) } label: { Label("Barcode", systemImage: "barcode") }
-            Button { model.add(.image) } label: { Label("Image", systemImage: "photo") }
-            Button { model.add(.box) } label: { Label("Box", systemImage: "rectangle") }
-            Spacer()
+            // Full titles when there is room, icons alone when the window is narrow.
+            ViewThatFits(in: .horizontal) {
+                buttons(titles: true).fixedSize()
+                buttons(titles: false).fixedSize()
+            }
+            Spacer(minLength: 4)
             Text("\(model.doc.widthMM) × \(model.doc.lengthMM) mm")
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
                 .lineLimit(1)
                 .fixedSize()
+            Toggle(isOn: $exactDots) { Image(systemName: "square.grid.3x3") }
+                .toggleStyle(.button)
+                .help(exactDots ? "Showing the exact printer dots. Click for a smooth preview." : "Show the exact dots the printer will burn")
             Button { showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
                 .help(showInspector ? "Hide the inspector" : "Show the inspector")
         }
@@ -59,6 +79,8 @@ struct CanvasView: View {
     @ObservedObject var model: AppModel
     @State private var dragStart: CGPoint?
     @FocusState private var focused: Bool
+    @AppStorage("exactDots") private var exactDots = false
+    @Environment(\.displayScale) private var displayScale
 
     var body: some View {
         GeometryReader { geo in
@@ -90,14 +112,14 @@ struct CanvasView: View {
 
     @ViewBuilder
     private func label(scale: CGFloat) -> some View {
-        let bitmap = Renderer.render(model.doc)
+        let image = exactDots ? Renderer.render(model.doc).cgImage : Renderer.preview(model.doc, scale: scale * displayScale)
         let h = CGFloat(model.doc.widthDots)
         let margin = CGFloat(Wire.marginColumns) * scale
         let cropped = max(0, (h - CGFloat(Wire.headDots)) / 2) * scale
         ZStack(alignment: .topLeading) {
-            if let cg = bitmap.cgImage {
+            if let cg = image {
                 Image(decorative: cg, scale: 1)
-                    .interpolation(.none)
+                    .interpolation(exactDots ? .none : .high)
                     .resizable()
             } else {
                 Color.white
@@ -120,7 +142,10 @@ struct CanvasView: View {
             if let id = model.editingID, let e = model.doc.elements.first(where: { $0.id == id }) {
                 let b = Renderer.bounds(e)
                 InlineTextEditor(model: model, e: model.binding(for: id), scale: scale)
-                    .offset(x: b.minX.rounded() * scale - 5, y: b.minY.rounded() * scale - 3)
+                    .frame(width: InlineTextEditor.size(e, scale).width, height: InlineTextEditor.size(e, scale).height)
+                    .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1.5).padding(-3))
+                    .offset(x: b.midX * scale - InlineTextEditor.size(e, scale).width / 2,
+                            y: b.midY * scale - InlineTextEditor.size(e, scale).height / 2)
             } else if let e = model.selected {
                 let b = Renderer.bounds(e)
                 Rectangle()
@@ -149,12 +174,16 @@ struct CanvasView: View {
                         }
                     }
                     guard let start = dragStart, start.x > -1e8, let i = model.selectedIndex else { return }
-                    let nx = (start.x + g.translation.width / scale).rounded()
-                    let ny = (start.y + g.translation.height / scale).rounded()
-                    if model.doc.elements[i].x != nx || model.doc.elements[i].y != ny {
-                        model.doc.elements[i].x = nx
-                        model.doc.elements[i].y = ny
+                    let dx = (g.translation.width / scale).rounded(), dy = (g.translation.height / scale).rounded()
+                    var e = model.doc.elements[i]
+                    e.x = dx == 0 ? start.x : (start.x + dx).rounded()
+                    if dy != 0 {
+                        e.y = (start.y + dy).rounded()
+                        e.verticalAlignment = -1          // dragging up or down releases top/middle/bottom
+                    } else if e.verticalAlignment < 0 {
+                        e.y = start.y
                     }
+                    if e != model.doc.elements[i] { model.doc.elements[i] = e }
                 }
                 .onEnded { _ in dragStart = nil }
         )
@@ -169,33 +198,82 @@ struct CanvasView: View {
 
 // MARK: - typing on the label
 
-/// A text field laid over a text element so it can be typed into in place.
-struct InlineTextEditor: View {
+/// A text view laid exactly over a text item, in the very font it prints with, so typing happens in place.
+/// Return starts a new line; Esc or a click elsewhere finishes.
+struct InlineTextEditor: NSViewRepresentable {
     @ObservedObject var model: AppModel
     @Binding var e: LabelElement
     let scale: CGFloat
-    @FocusState private var focused: Bool
 
-    var body: some View {
-        let n = Renderer.naturalSize(e)
-        // A text view, so Return starts a new line. Esc or a click elsewhere finishes.
-        TextEditor(text: $e.text)
-            .font(.custom(e.fontName, size: (e.fitSize ?? e.fontSize) * scale).weight(e.bold ? .bold : .regular))
-            .italic(e.italic)
-            .multilineTextAlignment(e.alignment == 0 ? .leading : (e.alignment == 2 ? .trailing : .center))
-            .foregroundStyle(.black)
-            .scrollContentBackground(.hidden)
-            .scrollDisabled(true)
-            .scrollIndicators(.never)
-            .frame(width: max(60, n.width * scale + 28), height: max(22, n.height * scale + 8))
-            .background(Color.white)
-            .environment(\.colorScheme, .light)
-            .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1.5))
-            .focused($focused)
-            .onKeyPress(.escape) { model.endEditing(); return .handled }
-            .onExitCommand { model.endEditing() }
-            .onAppear { DispatchQueue.main.async { focused = true } }
-            .onChange(of: focused) { _, isFocused in if !isFocused { model.endEditing() } }
+    static func size(_ e: LabelElement, _ scale: CGFloat) -> CGSize {
+        let n = Renderer.textSize(e, scale: scale)
+        return CGSize(width: max(12, n.width + 2), height: max(12, n.height))
+    }
+
+    func makeCoordinator() -> Coordinator { Coordinator(self) }
+
+    func makeNSView(context: Context) -> NSTextView {
+        let view = NSTextView()
+        view.delegate = context.coordinator
+        view.isRichText = false
+        view.allowsUndo = false                       // undo belongs to the label, not this field
+        view.drawsBackground = true
+        view.backgroundColor = .white
+        view.insertionPointColor = .black
+        view.textContainerInset = .zero
+        view.textContainer?.lineFragmentPadding = 0
+        view.textContainer?.widthTracksTextView = true
+        view.isAutomaticQuoteSubstitutionEnabled = false
+        view.isAutomaticDashSubstitutionEnabled = false
+        view.isAutomaticTextReplacementEnabled = false
+        view.isAutomaticSpellingCorrectionEnabled = false
+        view.isContinuousSpellCheckingEnabled = false
+        view.string = e.text
+        style(view)
+        let fresh = e.text == "Text"
+        DispatchQueue.main.async {
+            view.window?.makeFirstResponder(view)
+            if fresh { view.selectAll(nil) } else { view.setSelectedRange(NSRange(location: (view.string as NSString).length, length: 0)) }
+        }
+        return view
+    }
+
+    func updateNSView(_ view: NSTextView, context: Context) {
+        context.coordinator.parent = self
+        if view.string != e.text { view.string = e.text }
+        style(view)
+    }
+
+    private func style(_ view: NSTextView) {
+        let paragraph = NSMutableParagraphStyle()
+        paragraph.alignment = e.alignment == 0 ? .left : (e.alignment == 2 ? .right : .center)
+        paragraph.lineBreakMode = .byClipping        // never wrap: lines break only where the text does
+        let attributes: [NSAttributedString.Key: Any] = [
+            .font: Renderer.font(for: e, scale: scale), .foregroundColor: NSColor.black, .paragraphStyle: paragraph,
+        ]
+        view.defaultParagraphStyle = paragraph
+        view.typingAttributes = attributes
+        if let storage = view.textStorage { storage.setAttributes(attributes, range: NSRange(location: 0, length: storage.length)) }
+    }
+
+    final class Coordinator: NSObject, NSTextViewDelegate {
+        var parent: InlineTextEditor
+        init(_ parent: InlineTextEditor) { self.parent = parent }
+
+        func textDidChange(_ notification: Notification) {
+            guard let view = notification.object as? NSTextView, parent.e.text != view.string else { return }
+            parent.e.text = view.string
+        }
+
+        func textView(_ textView: NSTextView, doCommandBy selector: Selector) -> Bool {
+            guard selector == #selector(NSResponder.cancelOperation(_:)) else { return false }
+            parent.model.endEditing()
+            return true
+        }
+
+        func textDidEndEditing(_ notification: Notification) {
+            DispatchQueue.main.async { self.parent.model.endEditing() }
+        }
     }
 }
 
@@ -338,8 +416,9 @@ struct InspectorPanel: View {
                     labelSettings
                 }
             }
-            .padding(14)
+            .padding(12)
             .frame(maxWidth: .infinity, alignment: .leading)
+            .controlSize(.small)
         }
     }
 
@@ -364,6 +443,8 @@ struct InspectorPanel: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         Divider()
+        Button("Reset Everything") { model.resetEverything() }
+            .help("Every item back to its default style and centred; 1 copy, darkness 4. Keeps the content.")
         Text("Select an item on the label to edit it, or add one from the bar above. Double-click text to type on the label; Return starts a new line, Esc finishes. Drag to move; arrow keys nudge by one dot.")
             .font(.caption)
             .foregroundStyle(.secondary)
@@ -400,7 +481,11 @@ struct ElementInspector: View {
         Text("Position").font(.subheadline).foregroundStyle(.secondary)
         HStack {
             mmField("X", $e.x)
-            mmField("Y", $e.y)
+            mmField("Y", Binding(get: { e.y }, set: { new in
+                var copy = e
+                copy.y = new; copy.verticalAlignment = -1
+                e = copy
+            }))
         }
         Picker("Rotation", selection: $e.rotation) {
             Text("0°").tag(0); Text("90°").tag(90); Text("180°").tag(180); Text("270°").tag(270)
@@ -420,6 +505,26 @@ struct ElementInspector: View {
             Button("Duplicate") { model.duplicateSelected() }
             Button("Delete", role: .destructive) { model.deleteSelected() }
         }
+        Button("Reset to Defaults") { model.resetSelected() }
+            .help("Default font, size and style, centred on the label. Keeps the content.")
+    }
+
+    /// Lines of text hugging the top, middle or bottom of the space, as word processors draw it.
+    private static func verticalIcon(_ position: Int) -> NSImage {
+        let size = NSSize(width: 15, height: 13)
+        let image = NSImage(size: size, flipped: true) { _ in
+            let line: CGFloat = 1.5, gap: CGFloat = 2
+            let block = 3 * line + 2 * gap
+            let top: CGFloat = position == 0 ? 0 : (position == 1 ? (size.height - block) / 2 : size.height - block)
+            NSColor.black.setFill()
+            for i in 0..<3 {
+                NSBezierPath(roundedRect: NSRect(x: 1, y: top + CGFloat(i) * (line + gap), width: size.width - 2, height: line),
+                             xRadius: line / 2, yRadius: line / 2).fill()
+            }
+            return true
+        }
+        image.isTemplate = true
+        return image
     }
 
     private func mmField(_ label: String, _ value: Binding<Double>) -> some View {
@@ -449,12 +554,14 @@ struct ElementInspector: View {
         Picker("Font", selection: $e.fontName) {
             ForEach(Self.families, id: \.self) { Text($0).tag($0) }
         }
-        slider("Size", $e.fontSize, 10...160)
-        Toggle("Shrink to fit label", isOn: $e.autoShrink)
-        if let fit = e.fitSize {
-            Text("Shrunk to \(String(format: "%.1f", fit / 8)) mm to fit.")
+        slider("Size", $e.fontSize, 6...160)
+            .disabled(e.autoShrink)
+        Toggle("Fit size to label", isOn: $e.autoShrink)
+        if e.autoShrink {
+            Text("Size follows the text so it always fills the label. Turn off to keep a size.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
         }
         HStack {
             Toggle(isOn: $e.bold) { Image(systemName: "bold") }.toggleStyle(.button)
@@ -466,6 +573,18 @@ struct ElementInspector: View {
             }
             .pickerStyle(.segmented)
             .labelsHidden()
+        }
+        HStack {
+            Text("Vertical alignment")
+            Picker("Vertical alignment", selection: $e.verticalAlignment) {
+                Image(nsImage: Self.verticalIcon(0)).tag(0)
+                Image(nsImage: Self.verticalIcon(1)).tag(1)
+                Image(nsImage: Self.verticalIcon(2)).tag(2)
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .fixedSize()
+            .help("Hold the text at the top, middle or bottom of the label. Dragging it up or down releases it.")
         }
     }
 

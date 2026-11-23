@@ -24,7 +24,7 @@ public enum QuickLabel {
     public static func printableRect(_ doc: LabelDocument) -> CGRect {
         let w = Double(doc.lengthDots), h = Double(doc.widthDots)
         let cropped = max(0, (h - Double(Wire.headDots)) / 2)
-        let insetX = Double(Wire.marginColumns) + 4, insetY = cropped + 4
+        let insetX = Double(Wire.marginColumns) + 2, insetY = cropped + 2
         return CGRect(x: insetX, y: insetY, width: max(8, w - 2 * insetX), height: max(8, h - 2 * insetY))
     }
 
@@ -52,7 +52,7 @@ public enum QuickLabel {
                 let b = Renderer.bounds(e)
                 if b.width <= rect.width && b.height <= rect.height { lo = mid } else { hi = mid }
             }
-            e.fontSize = lo.rounded(.down)
+            e.fontSize = (lo * 4).rounded(.down) / 4
         }
         center(&e, in: rect)
     }
@@ -62,6 +62,7 @@ public enum QuickLabel {
         e.text = string
         e.fontName = style.fontName; e.bold = style.bold; e.italic = style.italic
         e.alignment = style.alignment; e.rotation = style.rotation
+        e.autoShrink = false            // laid out here; captions must not grow to fill the whole label
         return e
     }
 
@@ -69,6 +70,7 @@ public enum QuickLabel {
         var doc = blank(widthMM: widthMM, lengthMM: lengthMM)
         var e = textElement(string, style)
         fit(&e, in: printableRect(doc), fixedSize: style.sizeMM.map { $0 * Double(Wire.dotsPerMM) })
+        if style.sizeMM == nil { e.autoShrink = true; e.verticalAlignment = 1 }   // keeps filling the label if edited in the app
         doc.elements = [e]
         return doc
     }
@@ -142,28 +144,34 @@ public enum QuickLabel {
 }
 
 extension LabelDocument {
-    /// For every text item with `autoShrink`: reduce its size until it fits the printable area,
-    /// and slide it back onto the label if it hangs over an edge. Safe to call repeatedly.
+    /// Settles every text item: with `autoShrink`, set its size to the largest that fits the printable
+    /// area and keep it on the label; with a vertical alignment,
+    /// hold it at the top, middle or bottom. Safe to call repeatedly.
     public mutating func fitText() {
         let rect = QuickLabel.printableRect(self)
         for i in elements.indices where elements[i].kind == .text {
             var e = elements[i]
-            e.fitSize = nil
-            guard e.autoShrink else { elements[i] = e; continue }
             var b = Renderer.bounds(e)
-            if b.width > rect.width || b.height > rect.height {
-                var lo = 6.0, hi = e.fontSize
-                for _ in 0..<12 {
-                    let mid = (lo + hi) / 2
-                    e.fitSize = mid
+            if e.autoShrink {
+                // Largest size that fits, whether that means growing or shrinking.
+                var lo = 6.0, hi = 400.0
+                for _ in 0..<14 {
+                    e.fontSize = (lo + hi) / 2
                     b = Renderer.bounds(e)
-                    if b.width <= rect.width && b.height <= rect.height { lo = mid } else { hi = mid }
+                    if b.width <= rect.width && b.height <= rect.height { lo = e.fontSize } else { hi = e.fontSize }
                 }
-                e.fitSize = max(6, lo.rounded(.down))
+                e.fontSize = max(6, (lo * 4).rounded(.down) / 4)
                 b = Renderer.bounds(e)
+                // Positions stay fractional so text re-centred around the same point never drifts.
+                e.x = max(rect.minX, min(e.x, rect.maxX - b.width))
+                e.y = max(rect.minY, min(e.y, rect.maxY - b.height))
             }
-            e.x = max(rect.minX, min(e.x, rect.maxX - b.width)).rounded()
-            e.y = max(rect.minY, min(e.y, rect.maxY - b.height)).rounded()
+            switch e.verticalAlignment {
+            case 0: e.y = rect.minY
+            case 1: e.y = rect.midY - b.height / 2
+            case 2: e.y = rect.maxY - b.height
+            default: break
+            }
             if e != elements[i] { elements[i] = e }
         }
     }

@@ -16,6 +16,7 @@ rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources"
 cp "$BIN" "$APP/Contents/MacOS/LabelPrint"
 cp scripts/Info.plist "$APP/Contents/Info.plist"
+cp Resources/AppIcon.icns "$APP/Contents/Resources/AppIcon.icns"   # regenerate with scripts/make_icon.swift
 
 pick() { security find-identity -v -p codesigning | grep -v REVOKED | grep "$1" | head -1 | sed -E 's/^ *[0-9]+\) ([0-9A-F]{40}).*/\1/'; }
 ID="${SIGN_IDENTITY:-$(pick 'Developer ID Application')}"

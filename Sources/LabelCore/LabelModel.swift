@@ -22,10 +22,10 @@ public struct LabelElement: Identifiable, Codable, Equatable {
     public var italic = false
     /// 0 left, 1 centre, 2 right (multi-line text).
     public var alignment = 1
-    /// Shrink the text, and keep it on the label, when it would not fit at `fontSize`.
+    /// Keep `fontSize` at the largest size that fits the label, growing and shrinking with the text.
     public var autoShrink = true
-    /// The size actually used when `autoShrink` had to reduce it; nil when `fontSize` fits.
-    public var fitSize: Double?
+    /// Where text sits across the label: 0 top, 1 middle, 2 bottom, -1 wherever it was put.
+    public var verticalAlignment = -1
 
     // qr / barcode / image / box
     public var width: Double = 72
@@ -51,7 +51,7 @@ public struct LabelElement: Identifiable, Codable, Equatable {
         text = value(.text, ""); fontName = value(.fontName, "Helvetica Neue"); fontSize = value(.fontSize, 40)
         bold = value(.bold, false); italic = value(.italic, false); alignment = value(.alignment, 1)
         autoShrink = value(.autoShrink, true)
-        fitSize = (try? c.decodeIfPresent(Double.self, forKey: .fitSize)) ?? nil
+        verticalAlignment = value(.verticalAlignment, -1)
         width = value(.width, 72); height = value(.height, 72)
         lineWidth = value(.lineWidth, 2); cornerRadius = value(.cornerRadius, 0)
         imageData = (try? c.decodeIfPresent(Data.self, forKey: .imageData)) ?? nil
@@ -83,7 +83,7 @@ public struct LabelDocument: Codable, Equatable {
         var qr = LabelElement(kind: .qr)
         qr.text = "https://example.com"; qr.width = 81; qr.x = 14; qr.y = 7
         var t = LabelElement(kind: .text)
-        t.text = "Label Print"; t.fontSize = 34; t.bold = true; t.x = 108; t.y = 27
+        t.text = "Label Print"; t.fontSize = 34; t.bold = true; t.x = 108; t.y = 27; t.autoShrink = false
         d.elements = [qr, t]
         return d
     }
