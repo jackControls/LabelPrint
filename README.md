@@ -44,3 +44,7 @@ The printer protocol was worked out by others. This project is written from the 
 used to call the copy of liblzma that ships with macOS.
 
 Not affiliated with Katasymbol or Supvan.
+
+## License
+
+MIT. See [LICENSE](LICENSE). The liblzma headers keep their own 0BSD license.
