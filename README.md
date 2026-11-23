@@ -11,6 +11,23 @@ that normally only work with the phone app.
 
 It talks to the printer directly over Bluetooth LE. No driver, no account, no phone.
 
+## Works with AI agents and scripts
+
+Everything the app can print, the `labelprint` command can print too, so an AI agent (or a shell script)
+can make labels for you without touching the window:
+
+```bash
+labelprint status --json                       # model, battery, roll size, labels left
+labelprint text "Flour\nopened 22 Nov" --bold  # print it
+labelprint qr "https://example.com" --preview check.png   # look before printing
+```
+
+- `scan` and `status` can answer in JSON.
+- `--preview out.png` writes the label as a picture instead of printing, so an agent can check its work
+  without using a label.
+- Errors go to stderr with a plain message; the exit code is 0 on success, 1 on failure, 2 for bad arguments.
+- `labelprint help` lists every command and option on one screen.
+
 ## Printers
 
 **Tested with:** Katasymbol E11 (Bluetooth name starting `T0224`), on 12 × 40 mm die-cut labels.
