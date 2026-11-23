@@ -4,23 +4,26 @@ import SwiftUI
 
 struct ContentView: View {
     @ObservedObject var model: AppModel
+    @AppStorage("showInspector") private var showInspector = true
 
     var body: some View {
         HStack(spacing: 0) {
             PrinterPanel(model: model, printer: model.printer)
-                .frame(width: 250)
+                .frame(width: 220)
             Divider()
             VStack(spacing: 0) {
                 AddBar(model: model)
                 Divider()
                 CanvasView(model: model)
             }
-            .frame(minWidth: 420)
-            Divider()
-            InspectorPanel(model: model, printer: model.printer)
-                .frame(width: 270)
+            .frame(minWidth: 430)
+            if showInspector {
+                Divider()
+                InspectorPanel(model: model, printer: model.printer)
+                    .frame(width: 220)
+            }
         }
-        .frame(minWidth: 980, minHeight: 520)
+        .frame(minHeight: 380)
     }
 }
 
@@ -28,6 +31,7 @@ struct ContentView: View {
 
 struct AddBar: View {
     @ObservedObject var model: AppModel
+    @AppStorage("showInspector") private var showInspector = true
 
     var body: some View {
         HStack(spacing: 8) {
@@ -40,6 +44,10 @@ struct AddBar: View {
             Text("\(model.doc.widthMM) × \(model.doc.lengthMM) mm")
                 .foregroundStyle(.secondary)
                 .monospacedDigit()
+                .lineLimit(1)
+                .fixedSize()
+            Button { showInspector.toggle() } label: { Image(systemName: "sidebar.right") }
+                .help(showInspector ? "Hide the inspector" : "Show the inspector")
         }
         .padding(10)
     }
@@ -170,19 +178,21 @@ struct InlineTextEditor: View {
 
     var body: some View {
         let n = Renderer.naturalSize(e)
-        TextField("", text: $e.text, axis: .vertical)
-            .textFieldStyle(.plain)
-            .font(.custom(e.fontName, size: e.fontSize * scale).weight(e.bold ? .bold : .regular))
+        // A text view, so Return starts a new line. Esc or a click elsewhere finishes.
+        TextEditor(text: $e.text)
+            .font(.custom(e.fontName, size: (e.fitSize ?? e.fontSize) * scale).weight(e.bold ? .bold : .regular))
             .italic(e.italic)
             .multilineTextAlignment(e.alignment == 0 ? .leading : (e.alignment == 2 ? .trailing : .center))
             .foregroundStyle(.black)
-            .padding(.horizontal, 5)
-            .padding(.vertical, 3)
-            .frame(width: max(60, n.width * scale + 30))
+            .scrollContentBackground(.hidden)
+            .scrollDisabled(true)
+            .scrollIndicators(.never)
+            .frame(width: max(60, n.width * scale + 28), height: max(22, n.height * scale + 8))
             .background(Color.white)
+            .environment(\.colorScheme, .light)
             .overlay(Rectangle().stroke(Color.accentColor, lineWidth: 1.5))
             .focused($focused)
-            .onSubmit { model.endEditing() }
+            .onKeyPress(.escape) { model.endEditing(); return .handled }
             .onExitCommand { model.endEditing() }
             .onAppear { DispatchQueue.main.async { focused = true } }
             .onChange(of: focused) { _, isFocused in if !isFocused { model.endEditing() } }
@@ -354,7 +364,7 @@ struct InspectorPanel: View {
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
         Divider()
-        Text("Select an item on the label to edit it, or add one from the bar above. Double-click text to type on the label. Drag to move; arrow keys nudge by one dot.")
+        Text("Select an item on the label to edit it, or add one from the bar above. Double-click text to type on the label; Return starts a new line, Esc finishes. Drag to move; arrow keys nudge by one dot.")
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
@@ -418,7 +428,7 @@ struct ElementInspector: View {
             TextField(label, value: Binding(get: { value.wrappedValue / 8 }, set: { value.wrappedValue = ($0 * 8).rounded() }),
                       format: .number.precision(.fractionLength(0...2)))
                 .textFieldStyle(.roundedBorder)
-                .frame(width: 58)
+                .frame(width: 44)
             Text("mm").font(.caption).foregroundStyle(.secondary)
         }
     }
@@ -440,6 +450,12 @@ struct ElementInspector: View {
             ForEach(Self.families, id: \.self) { Text($0).tag($0) }
         }
         slider("Size", $e.fontSize, 10...160)
+        Toggle("Shrink to fit label", isOn: $e.autoShrink)
+        if let fit = e.fitSize {
+            Text("Shrunk to \(String(format: "%.1f", fit / 8)) mm to fit.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
         HStack {
             Toggle(isOn: $e.bold) { Image(systemName: "bold") }.toggleStyle(.button)
             Toggle(isOn: $e.italic) { Image(systemName: "italic") }.toggleStyle(.button)

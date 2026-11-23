@@ -50,7 +50,7 @@ public enum Renderer {
         var traits: NSFontTraitMask = []
         if e.bold { traits.insert(.boldFontMask) }
         if e.italic { traits.insert(.italicFontMask) }
-        let size = max(4, e.fontSize)
+        let size = max(4, e.fitSize ?? e.fontSize)
         let font = NSFontManager.shared.font(withFamily: e.fontName, traits: traits, weight: e.bold ? 9 : 5, size: size)
             ?? (e.bold ? NSFont.boldSystemFont(ofSize: size) : NSFont.systemFont(ofSize: size))
         let para = NSMutableParagraphStyle()

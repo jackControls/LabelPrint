@@ -3,11 +3,14 @@ import SwiftUI
 
 struct LabelPrintApp: App {
     @StateObject private var model = AppModel()
+    @AppStorage("showInspector") private var showInspector = true
 
     var body: some Scene {
         Window("Label Print", id: "main") {
             ContentView(model: model)
         }
+        .defaultSize(width: 880, height: 420)
+        .windowResizability(.contentMinSize)
         .commands {
             CommandGroup(replacing: .newItem) {
                 Button("New Label") { model.newDocument() }.keyboardShortcut("n")
@@ -22,6 +25,9 @@ struct LabelPrintApp: App {
                 Button("Add Box") { model.add(.box) }
                 Divider()
                 Button("Duplicate") { model.duplicateSelected() }.keyboardShortcut("d")
+                Divider()
+                Button(showInspector ? "Hide Inspector" : "Show Inspector") { showInspector.toggle() }
+                    .keyboardShortcut("i", modifiers: [.command, .option])
             }
         }
     }

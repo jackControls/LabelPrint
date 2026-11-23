@@ -375,6 +375,7 @@ enum CLI {
                 guard args.positionals.count == 1 else { throw Failure.usage("print takes one label file.") }
                 var doc = try loadDocument(args.positionals[0])
                 doc.widthMM = widthMM; doc.lengthMM = lengthMM
+                doc.fitText()
                 return doc
             case "text":
                 var text = try one("some text")

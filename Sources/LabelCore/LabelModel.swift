@@ -22,6 +22,10 @@ public struct LabelElement: Identifiable, Codable, Equatable {
     public var italic = false
     /// 0 left, 1 centre, 2 right (multi-line text).
     public var alignment = 1
+    /// Shrink the text, and keep it on the label, when it would not fit at `fontSize`.
+    public var autoShrink = true
+    /// The size actually used when `autoShrink` had to reduce it; nil when `fontSize` fits.
+    public var fitSize: Double?
 
     // qr / barcode / image / box
     public var width: Double = 72
@@ -34,6 +38,25 @@ public struct LabelElement: Identifiable, Codable, Equatable {
     public var invert = false
 
     public init(kind: ElementKind) { self.kind = kind }
+
+    /// Reads files written by any version: fields a file does not have keep their defaults.
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        kind = try c.decode(ElementKind.self, forKey: .kind)
+        func value<T: Decodable>(_ key: CodingKeys, _ fallback: T) -> T {
+            ((try? c.decodeIfPresent(T.self, forKey: key)) ?? nil) ?? fallback
+        }
+        id = value(.id, UUID())
+        x = value(.x, 0); y = value(.y, 0); rotation = value(.rotation, 0)
+        text = value(.text, ""); fontName = value(.fontName, "Helvetica Neue"); fontSize = value(.fontSize, 40)
+        bold = value(.bold, false); italic = value(.italic, false); alignment = value(.alignment, 1)
+        autoShrink = value(.autoShrink, true)
+        fitSize = (try? c.decodeIfPresent(Double.self, forKey: .fitSize)) ?? nil
+        width = value(.width, 72); height = value(.height, 72)
+        lineWidth = value(.lineWidth, 2); cornerRadius = value(.cornerRadius, 0)
+        imageData = (try? c.decodeIfPresent(Data.self, forKey: .imageData)) ?? nil
+        dither = value(.dither, true); invert = value(.invert, false)
+    }
 }
 
 public struct LabelDocument: Codable, Equatable {
@@ -44,6 +67,13 @@ public struct LabelDocument: Codable, Equatable {
     public var elements: [LabelElement] = []
 
     public init() {}
+
+    public init(from decoder: Decoder) throws {
+        let c = try decoder.container(keyedBy: CodingKeys.self)
+        widthMM = ((try? c.decodeIfPresent(Int.self, forKey: .widthMM)) ?? nil) ?? 12
+        lengthMM = ((try? c.decodeIfPresent(Int.self, forKey: .lengthMM)) ?? nil) ?? 40
+        elements = try c.decodeIfPresent([LabelElement].self, forKey: .elements) ?? []
+    }
 
     public var widthDots: Int { widthMM * Wire.dotsPerMM }
     public var lengthDots: Int { lengthMM * Wire.dotsPerMM }

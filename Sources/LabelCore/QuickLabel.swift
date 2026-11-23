@@ -140,3 +140,31 @@ public enum QuickLabel {
         return doc
     }
 }
+
+extension LabelDocument {
+    /// For every text item with `autoShrink`: reduce its size until it fits the printable area,
+    /// and slide it back onto the label if it hangs over an edge. Safe to call repeatedly.
+    public mutating func fitText() {
+        let rect = QuickLabel.printableRect(self)
+        for i in elements.indices where elements[i].kind == .text {
+            var e = elements[i]
+            e.fitSize = nil
+            guard e.autoShrink else { elements[i] = e; continue }
+            var b = Renderer.bounds(e)
+            if b.width > rect.width || b.height > rect.height {
+                var lo = 6.0, hi = e.fontSize
+                for _ in 0..<12 {
+                    let mid = (lo + hi) / 2
+                    e.fitSize = mid
+                    b = Renderer.bounds(e)
+                    if b.width <= rect.width && b.height <= rect.height { lo = mid } else { hi = mid }
+                }
+                e.fitSize = max(6, lo.rounded(.down))
+                b = Renderer.bounds(e)
+            }
+            e.x = max(rect.minX, min(e.x, rect.maxX - b.width)).rounded()
+            e.y = max(rect.minY, min(e.y, rect.maxY - b.height)).rounded()
+            if e != elements[i] { elements[i] = e }
+        }
+    }
+}

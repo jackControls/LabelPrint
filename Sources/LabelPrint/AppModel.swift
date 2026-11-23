@@ -5,7 +5,15 @@ import SwiftUI
 import UniformTypeIdentifiers
 
 final class AppModel: ObservableObject {
-    @Published var doc: LabelDocument { didSet { if doc != oldValue { autosave() } } }
+    @Published var doc: LabelDocument {
+        didSet {
+            guard doc != oldValue else { return }
+            var fitted = doc
+            fitted.fitText()
+            if fitted != doc { doc = fitted; return }   // comes back through here once, already fitted
+            autosave()
+        }
+    }
     @Published var selection: UUID?
     /// Text element currently being typed into on the canvas.
     @Published var editingID: UUID?
@@ -23,6 +31,7 @@ final class AppModel: ObservableObject {
         } else {
             doc = .sample
         }
+        doc.fitText()
         // The label always takes the size of the roll the printer reports.
         rollWatch = printer.$material.sink { [weak self] m in
             DispatchQueue.main.async { self?.applyRoll(m) }
